@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
 @auther = 'Redheat'
@@ -9,26 +9,34 @@ from __future__ import absolute_import, unicode_literals
 from selenium import webdriver
 import selenium.webdriver.chrome.service as chrome_service
 import sqlite3
+from bs4 import BeautifulSoup as BS4
+import json
 
 
 class OpenUrl(object):
     # 创建浏览器
     def __init__(self, proxy=None):
-        desired_capabilities = webdriver.DesiredCapabilities.CHROME.copy()
-        if proxy:
-            desired_capabilities['proxy'] = {
-                "httpProxy": proxy,
-                "ftpProxy": proxy,
-                "sslProxy": proxy,
-                "noProxy": None,
-                "proxyType": "MANUAL",
-                "class": "org.openqa.selenium.Proxy",
-                "autodetect": False
-            }
+        # desired_capabilities = webdriver.DesiredCapabilities.CHROME.copy()
+        # if proxy:
+        #     desired_capabilities['proxy'] = {
+        #         "httpProxy": proxy,
+        #         "ftpProxy": proxy,
+        #         "sslProxy": proxy,
+        #         "noProxy": None,
+        #         "proxyType": "MANUAL",
+        #         "class": "org.openqa.selenium.Proxy",
+        #         "autodetect": False
+        #     }
+        # desired_capabilities['chrome.binary'] = '/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome'
+        # service = chrome_service.Service('/Users/Redheat/Library/chromedriver/chromedriver')
+        # service.start()
+        # self.driver = webdriver.Remote(service.service_url, desired_capabilities)
         service = chrome_service.Service('/Users/Redheat/Library/chromedriver/chromedriver')
         service.start()
-        desired_capabilities['chrome.binary'] = '/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome'
-        self.driver = webdriver.Remote(service.service_url, desired_capabilities)
+        capabilities = webdriver.DesiredCapabilities.CHROME.copy()
+        capabilities['chrome.binary'] = '/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome'
+        # capabilities = {'chrome.binary': '/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome'}
+        self.driver = webdriver.Remote(service.service_url,capabilities)
 
     # 获取本年份的页码数
     def page_range(self, year):
@@ -58,7 +66,6 @@ class OpenUrl(object):
         except Exception as e:
             movie_name_en = None
             print(e)
-
         movie_type_div = self.driver.find_element_by_class_name('otherbox')
         # 电影时长
         movie_time = movie_type_div.find_element_by_tag_name('span').text
@@ -97,23 +104,36 @@ class OpenUrl(object):
 
     # 获取评论数据
     def get_commit(self, url, page):
+        old_url = url
         if page == 1:
             url += 'reviews/short/new.html'
         else:
             url += 'reviews/short/new-%s.html' % page
-        self.driver.get(url)
         print(url)
-        commit_div = self.driver.find_element_by_id('tweetRegion')
-        dd_list = commit_div.find_elements_by_tag_name('dd')
+        self.driver.get(url)
+        soup = BS4(self.driver.page_source,'lxml')
+        commit_div = soup.find(id='tweetRegion')
+        # commit_div = self.driver.find_element_by_id('tweetRegion')
+        dd_list = commit_div.find_all("dd")
+        # dd_list = commit_div.find_elements_by_tag_name('dd')
         commit_list = []
         for dd in dd_list:
             commit_details = {}
-            commit_details['url'] = url
-            commit_details['commit'] = dd.find_element_by_tag_name('h3').text
-            commit_details['userneck'] = dd.find_element_by_class_name('px14').find_element_by_tag_name('a').text
-            commit_details['score'] = dd.find_element_by_tag_name('span').text
-            commit_details['commit_time'] = dd.find_element_by_class_name('mt10').find_element_by_tag_name(
-                'a').get_attribute('entertime')
+            commit_details['url'] = old_url
+            # commit_details['commit'] = dd.find_element_by_tag_name('h3').text
+            commit_details['commit'] = dd.find('h3').text
+            # commit_details['userneck'] = dd.find_element_by_class_name('px14').find_element_by_tag_name('a').text
+            commit_details['userneck'] = dd.find(class_='px14').find('a').text
+            # commit_details['score'] = dd.find_element_by_tag_name('span').text
+            try:
+                commit_details['score'] = dd.find('span').text
+            except AttributeError as e:
+                commit_details['score'] = None
+                print(e)
+            # commit_details['commit_time'] = dd.find_element_by_class_name('mt10').find_element_by_tag_name(
+            #     'a').get_attribute('entertime')
+            commit_details['commit_time'] = dd.find(class_='mt10').find(
+                'a').attrs['entertime']
             commit_list.append(commit_details)
         return commit_list
         # def __del__(self):
@@ -131,10 +151,11 @@ class ProcessDb(object):
         return self.cursor.fetchall()
 
     # 查询url
-    def select_urls(self):
-        self.cursor.execute('SELECT * FROM urls')
+    def select_urls(self,tp='commit'):
+        self.cursor.execute('SELECT * FROM urls WHERE %s_complate = 0' % tp)
         return self.cursor.fetchall()
-
+    def update_urls(self,url,tp='commit',):
+        self.cursor.execute('UPDATE urls SET %s_complate=1 WHERE url = "%s" ' % (tp,url))
     # 把url插入到数据库
     def insertUrls(self, url_list, year):
         for url in url_list:
@@ -161,11 +182,11 @@ class ProcessDb(object):
     # 插入评论信息
     def insertCommit(self, commit_list):
         for commit in commit_list:
-            self.cursor.execute('insert or ignore  into commit('
-                                'url, commit,userneck,score,commit_time'
-                                ') values ("%s","%s","%s","%s","%s")' % (
-                                    commit['url'], commit['commit'], commit['userneck'], commit['score'],
-                                    commit['commit_time'],))
+            self.cursor.execute('''insert or ignore  into commits(
+            url, commits,userneck,score,commits_time
+            ) values (?,?,?,?,?)''',(
+            commit['url'], commit['commit'], commit['userneck'], commit['score'],
+            commit['commit_time']))
 
     def __del__(self):
         self.cursor.close()
@@ -175,8 +196,8 @@ class ProcessDb(object):
 
 # 逻辑函数
 class Collect():
-    def __init__(self):
-        self.driver = OpenUrl()
+    def __init__(self,proxy=None):
+        self.driver = OpenUrl(proxy)
         self.db = ProcessDb("mtime.db3")
 
     # 收集url
@@ -190,7 +211,7 @@ class Collect():
 
     # 收集详细信息
     def details(self):
-        urls = self.db.select_urls()
+        urls = self.db.select_urls('details')
         for url_list in urls:
             url = url_list[1]
             print(url)
@@ -200,13 +221,32 @@ class Collect():
 
     # 评论内容
     def commit(self):
-        urls = self.db.select_urls()
+        urls = self.db.select_urls('commit')
         for url_list in urls:
+            log = json.loads(self.log('r'))
             url = url_list[1]
-            for page in range(1, 11):
+            print(url)
+            page = log['page']
+            if page == 10:
+                page = 1
+            while page<=10:
                 commit_list = self.driver.get_commit(url, page)
                 self.db.insertCommit(commit_list)
+                self.log('w',json.dumps({"url":url,"page":page}))
+                page += 1
+            self.db.update_urls(url,'commit')
+
+    def log(self,mode,content=None):
+            if mode=='r':
+                with open('mtime.log', 'r') as f:
+                    log = f.readlines()
+                    if len(log):
+                        return log[-1]
+                    else:
+                        return json.dumps({"page":1})
+            elif mode=='w':
+                with open('mtime.log', 'a') as f:
+                    f.write(content+'\n')
 
 
-collect = Collect()
-collect.commit()
+Collect().commit()
