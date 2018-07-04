@@ -36,7 +36,7 @@ class OpenUrl(object):
         capabilities = webdriver.DesiredCapabilities.CHROME.copy()
         capabilities['chrome.binary'] = '/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome'
         # capabilities = {'chrome.binary': '/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome'}
-        self.driver = webdriver.Remote(service.service_url,capabilities)
+        self.driver = webdriver.Remote(service.service_url, capabilities)
 
     # 获取本年份的页码数
     def page_range(self, year):
@@ -111,7 +111,7 @@ class OpenUrl(object):
             url += 'reviews/short/new-%s.html' % page
         print(url)
         self.driver.get(url)
-        soup = BS4(self.driver.page_source,'lxml')
+        soup = BS4(self.driver.page_source, 'lxml')
         commit_div = soup.find(id='tweetRegion')
         # commit_div = self.driver.find_element_by_id('tweetRegion')
         dd_list = commit_div.find_all("dd")
@@ -151,11 +151,13 @@ class ProcessDb(object):
         return self.cursor.fetchall()
 
     # 查询url
-    def select_urls(self,tp='commit'):
+    def select_urls(self, tp='commit'):
         self.cursor.execute('SELECT * FROM urls WHERE %s_complate = 0' % tp)
         return self.cursor.fetchall()
-    def update_urls(self,url,tp='commit',):
-        self.cursor.execute('UPDATE urls SET %s_complate=1 WHERE url = "%s" ' % (tp,url))
+
+    def update_urls(self, url, tp='commit', ):
+        self.cursor.execute('UPDATE urls SET %s_complate=1 WHERE url = "%s" ' % (tp, url))
+
     # 把url插入到数据库
     def insertUrls(self, url_list, year):
         for url in url_list:
@@ -178,15 +180,19 @@ class ProcessDb(object):
             )
         except Exception as e:
             print(e)
+    #查询所有
+    def selectAll(self):
+        self.cursor.execute('SELECT * FROM commits LEFT JOIN (SELECT * FROM urls,details WHERE urls.url=details.url) url_detail WHERE commits.url=url_detail.url')
+        return self.cursor.fetchall()
 
     # 插入评论信息
     def insertCommit(self, commit_list):
         for commit in commit_list:
-            self.cursor.execute('''insert or ignore  into commits(
+            self.cursor.execute('''INSERT OR IGNORE  INTO commits(
             url, commits,userneck,score,commits_time
-            ) values (?,?,?,?,?)''',(
-            commit['url'], commit['commit'], commit['userneck'], commit['score'],
-            commit['commit_time']))
+            ) VALUES (?,?,?,?,?)''', (
+                commit['url'], commit['commit'], commit['userneck'], commit['score'],
+                commit['commit_time']))
 
     def __del__(self):
         self.cursor.close()
@@ -196,7 +202,7 @@ class ProcessDb(object):
 
 # 逻辑函数
 class Collect():
-    def __init__(self,proxy=None):
+    def __init__(self, proxy=None):
         self.driver = OpenUrl(proxy)
         self.db = ProcessDb("mtime.db3")
 
@@ -229,24 +235,29 @@ class Collect():
             page = log['page']
             if page == 10:
                 page = 1
-            while page<=10:
+            while page <= 10:
                 commit_list = self.driver.get_commit(url, page)
                 self.db.insertCommit(commit_list)
-                self.log('w',json.dumps({"url":url,"page":page}))
+                self.log('w', json.dumps({"url": url, "page": page}))
                 page += 1
-            self.db.update_urls(url,'commit')
+            self.db.update_urls(url, 'commit')
 
-    def log(self,mode,content=None):
-            if mode=='r':
-                with open('mtime.log', 'r') as f:
-                    log = f.readlines()
-                    if len(log):
-                        return log[-1]
-                    else:
-                        return json.dumps({"page":1})
-            elif mode=='w':
-                with open('mtime.log', 'a') as f:
-                    f.write(content+'\n')
+    def log(self, mode, content=None):
+        if mode == 'r':
+            with open('mtime.log', 'r') as f:
+                log = f.readlines()
+                if len(log):
+                    return log[-1]
+                else:
+                    return json.dumps({"page": 1})
+        elif mode == 'w':
+            with open('mtime.log', 'a') as f:
+                f.write(content + '\n')
 
 
-Collect().commit()
+# Collect().commit()
+db = ProcessDb("mtime.db3")
+content = db.selectAll()
+with open("commit.txt",'w') as f:
+    for i in set(content):
+        f.write(str(i)+'\n')
